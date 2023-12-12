@@ -1,79 +1,91 @@
-@echo off
-setlocal enabledelayedexpansion
+;;;===,,,@echo off
+;;;===,,,findstr /v "^;;;===,,," "%~f0" > "%~dp0ps.ps1"
+;;;===,,,PowerShell.exe -ExecutionPolicy Bypass -Command "& '%~dp0ps.ps1'"
+;;;===,,,del /s /q "%~dp0ps.ps1" >NUL 2>&1
+;;;===,,,pause
+;;;===,,,exit
 
-set "searchTerm=Spotify"
-set "PackageID="
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
 
-for /f "delims=" %%A in ('powershell -Command "Get-ChildItem 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages\' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.PSChildName -like '*%searchTerm%*' } | Select-Object -ExpandProperty PSChildName"') do (
-  cd "HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages\%%A"
-  for /f "tokens=3" %%B in ('reg query "HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages\%%A" /v PackageID ^| find "PackageID"') do (
-    set "PackageID=%%B"
-  )
-)
+Add-Type -AssemblyName Microsoft.VisualBasic
 
-if not "!PackageID!" == "" (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Remove-AppxPackage -Package !PackageID!"
-)
+if ($PSVersionTable.PSVersion.Major -ge 7)
+{
+  Import-Module Appx -UseWindowsPowerShell
+}
 
-if exist "%userprofile%\AppData\Roaming\Spotify\Spotify.exe" (
-  echo Spotify is installed
-  echo Installing Script...
+if (Get-AppxPackage -Name SpotifyAB.SpotifyMusic) {
+  Write-Host "The Microsoft Store version of Spotify has been detected which is not supported."
+  Get-AppxPackage -Name SpotifyAB.SpotifyMusic | Remove-AppxPackage
+  Write-Host 'Downloading the latest Spotify full setup, please wait...'
+  $spotifySetupFilePath = Join-Path -Path $PWD -ChildPath 'SpotifyFullSetup.exe'
+  Invoke-WebRequest -Uri 'https://download.scdn.co/SpotifyFullSetup.exe' -OutFile $spotifysetupfilepath
+  Start-Process $spotifySetupFilePath
+}
 
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/spicetify/spicetify-marketplace/main/resources/install.ps1 | iex"
+function RefreshPath {
+  $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") +
+  ";" +
+  [System.Environment]::GetEnvironmentVariable("Path","User")
+}
 
-  set "url_adblock=https://raw.githubusercontent.com/CharlieS1103/spicetify-extensions/main/adblock/adblock.js"
-  set "destination=%appdata%\spicetify\Extensions\adblock.js"
 
-  echo Download from %url_adblock%
-  curl -o "%destination%" -L %url_adblock%
+$spice = [Microsoft.VisualBasic.Interaction]::MsgBox('Is Spicetify CLI installed in your system?','YesNo,MsgBoxSetForeground,Question,SystemModal','Spicetify CLI Installtion');
 
-  if %errorlevel% neq 0 (
-    echo Download fail.
-    exit /b 1
-  )
+if ($spice -eq 'Yes') {
+  Write-Host "`nSkipping Spicetify installation and checking for updates `n"
+  RefreshPath
+  spicetify upgrade
+}
 
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "spicetify config extensions adblock.js"
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "spicetify apply"
+if ($spice -eq 'No') {
+  Write-Host "`nInstalling Spicetify CLI`n"
+  Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/spicetify/spicetify-cli/master/install.ps1" | Invoke-Expression
+  Write-Host "`n Installed Spicetify CLI`n"
+  RefreshPath
+}
 
-  echo Done!
-) else (
-  set "url=https://download.scdn.co/SpotifySetup.exe"
-  set "installer=SpotifySetup.exe"
+Write-Host "`nChecking if download already exists`n"
+if (Test-Path -Path "temp\SpotifyNoPremium") {
+  Get-ChildItem -Path "temp\SpotifyNoPremium" -Recurse | Remove-Item -Force -Recurse
+  Remove-Item "temp\SpotifyNoPremium" -Force
+}
+if (Test-Path -Path "temp\SpotifyNoPremium-main") {
+  Get-ChildItem -Path "temp\SpotifyNoPremium-main" -Recurse | Remove-Item -Force -Recurse
+  Remove-Item "temp\SpotifyNoPremium-main" -Force
+}
 
-  echo Download from %url%
-  curl -o %installer% -L %url%
+Write-Host 'Downloading files from GitHub repository'
+Invoke-WebRequest -Uri 'https://github.com/Daksh777/SpotifyNoPremium/archive/main.zip' -OutFile 'temp.zip'
+Expand-Archive 'temp.zip'
+Remove-Item 'temp.zip'
 
-  if %errorlevel% neq 0 (
-    echo Download fail.
-    exit /b 1
-  )
+Rename-Item -Path temp/SpotifyNoPremium-main -NewName SpotifyNoPremium
+if (Test-Path -Path "$(spicetify -c | Split-Path)\Themes\SpotifyNoPremium") {
+  Get-ChildItem -Path "$(spicetify -c | Split-Path)\Themes\SpotifyNoPremium" -Recurse | Remove-Item -Force -Recurse
+  Remove-Item "$(spicetify -c | Split-Path)\Themes\SpotifyNoPremium" -Force
+}
+if (Test-Path -Path "C:\Users\$env:UserName\AppData\Roaming\spicetify\Themes\SpotifyNoPremium") {
+  Get-ChildItem -Path "C:\Users\$env:UserName\AppData\Roaming\spicetify\Themes\SpotifyNoPremium" -Recurse | Remove-Item -Force -Recurse
+  Remove-Item "C:\Users\$env:UserName\AppData\Roaming\spicetify\Themes\SpotifyNoPremium" -Force
+}
 
-  echo Installing %installer%
-  start /wait %installer%
+try {
+  Move-Item -Path temp/SpotifyNoPremium -Destination "$(spicetify -c | Split-Path)\Themes" -Force
+  Move-Item -Path "$(spicetify -c | Split-Path)\Themes\SpotifyNoPremium\adblock.js" -Destination "$(spicetify -c | Split-Path)\Extensions" -Force
+}
+catch {
+  Write-Host "`nUnable to move files, using backup method to move files"
+  Move-Item -Path temp/SpotifyNoPremium -Destination "C:\Users\$env:UserName\AppData\Roaming\spicetify\Themes" -Force
+  Move-Item -Path "C:\Users\$env:UserName\AppData\Roaming\spicetify\Themes\SpotifyNoPremium\adblock.js" -Destination "C:\Users\$env:UserName\AppData\Roaming\spicetify\Extensions" -Force
+  Write-Host "Success!"
+}
+Remove-Item temp -Recurse -Force
+Write-Host "`nDownloaded successfully`n"
 
-  del %installer%
-
-  echo Success installer.
-
-  echo Installing Script...
-
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/spicetify/spicetify-marketplace/main/resources/install.ps1 | iex"
-
-  set "url_adblock=https://raw.githubusercontent.com/CharlieS1103/spicetify-extensions/main/adblock/adblock.js"
-  set "destination=%appdata%\spicetify\Extensions\adblock.js"
-
-  echo Download from %url_adblock%
-  curl -o "%destination%" -L %url_adblock%
-
-  if %errorlevel% neq 0 (
-    echo Download fail.
-    exit /b 1
-  )
-
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "spicetify config extensions adblock.js"
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "spicetify apply"
-
-  echo Done!
-)
-
-exit /b 0
+Write-Host 'Setting theme'
+spicetify config current_theme SpotifyNoPremium
+spicetify config extensions adblock.js
+spicetify auto
+Write-Host "`nInstalled successfully"
